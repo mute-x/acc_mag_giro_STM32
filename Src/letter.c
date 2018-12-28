@@ -25,6 +25,7 @@ const struct letter alpha[256] = {
 	[(unsigned char)'8'] =	{ .w = 4, .letter = { 0x0,  0x1B, 0x15, 0x1B,} },
 	[(unsigned char)'9'] =	{ .w = 4, .letter = { 0x0,  0x17, 0x15, 0xF,} },
 	[(unsigned char)'?'] =	{ .w = 3, .letter = { 0x1,  0x15, 0x2,} },
+	[(unsigned char)'œ'] =	{ .w = 4, .letter = { 0x0,  0x2,  0x5, 0x2,} },
 	[(unsigned char)'g'] =	{ .w = 4, .letter = { 0x0,  0x8, 0x54, 0x3C,} },
 	[(unsigned char)'Á'] =	{ .w = 4, .letter = { 0x0,  0x8, 0x14, 0x1C,} },
 	[(unsigned char)'Â'] =	{ .w = 4, .letter = { 0x0,  0xE, 0x15, 0x9,} },

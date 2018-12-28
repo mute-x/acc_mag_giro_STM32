@@ -1,6 +1,7 @@
 #ifndef accelerometer_define_h
 #define accelerometer_define_h
 #define ACC_ADDRESS 0x19
+#define MAG_ADDRESS 0x1E
 enum regAddr
     {
       TEMP_OUT_L        = 0x05, // D

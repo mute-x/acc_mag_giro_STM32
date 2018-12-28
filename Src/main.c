@@ -55,12 +55,17 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+#define DEBOUNCE_TIME 100
+
+static uint32_t lastPress = 0;
+enum {ACCEL, MAGNET, GYRO, NUM_SENSOR} volatile type = ACCEL;
 uint8_t a_config[] = {0x27, 0, 0, 0x80};
+uint8_t m_config[] = {0x10, 0x20, 0};
 uint8_t g_config[] = {L3GX_CTRL_REG1 | 0x40, 0xF, 0, 0, 0xA0};
 int16_t a_data[3]={0};
 uint8_t g_buf[7]={0};
 int16_t * g_data = (uint16_t*)(g_buf + 1);
-float a_max[4] = {0}, g_max[4] = {0};
+struct {float data[3]; float length;} max_val[NUM_SENSOR];
 volatile bool acc_conf = false;
 /* Private variables ---------------------------------------------------------*/
 
@@ -76,6 +81,22 @@ void SystemClock_Config(void);
 
 /* USER CODE BEGIN 0 */
 
+void EXTI0_IRQHandler(void)
+{
+	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+	if (HAL_GetTick() - lastPress < DEBOUNCE_TIME)
+		return;
+	lastPress = HAL_GetTick();
+}
+
+void HAL_SYSTICK_Callback(void)
+{
+    if (HAL_GetTick() - lastPress == DEBOUNCE_TIME &&
+	HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET) {
+	type = (type + 1) % NUM_SENSOR;
+    }
+}
+
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c){
 	// We finished setting up Accel
 	acc_conf = true;
@@ -83,30 +104,49 @@ void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c){
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c){
 	char str[100];
-	float acc_g[3] = { (a_data[0] >> 4) / 1024., (a_data[1] >> 4) / 1024., (a_data[2] >> 4) / 1024. };
-	float acc_mod = sqrt(acc_g[0]* acc_g[0] + acc_g[1]*acc_g[1] + acc_g[2]*acc_g[2]);
-	if (acc_mod > a_max[3]) {
+	float acc_g[3];
+	if (type == ACCEL)
 		for (int i = 0; i < 3; i++)
-			a_max[i] = acc_g[i];
-		a_max[3] = acc_mod;
+			acc_g[i] = (a_data[i] >> 4) / 1024.;
+	else {
+		acc_g[0] = ((int16_t) __REV16(a_data[0])) / 1100.;
+		acc_g[1] = ((int16_t) __REV16(a_data[2])) / 1100.;
+		acc_g[2] = ((int16_t) __REV16(a_data[1])) / 1100.;
 	}
+	float acc_mod = sqrt(acc_g[0]* acc_g[0] + acc_g[1]*acc_g[1] + acc_g[2]*acc_g[2]);
+	float angle =  (atan2(acc_g[1],acc_g[0]) * 180) / 3.1415926535;
+	if (acc_mod > max_val[type].length) {
+		for (int i = 0; i < 3; i++)
+			max_val[type].data[i] = acc_g[i];
+		max_val[type].length = acc_mod;
+	}
+	display_set_write_position(0, 0);
+	if (type == ACCEL)
+		display_write("--áëóåìåòïíåôò--");
+	else
+		display_write("-- íáçî¶ôïíåôò --");
+	display_set_write_position(3, 0);
+	display_write("íÁËÓÉÍÁÌØÎ¦ ÚÎÁÞÅÎÎÑ:");
 	for (int i = 0; i < 3; i++) {
-		display_set_write_position(0, 28 * i);
-		snprintf(str, 100, "%6.3fg", acc_g[i]);
+		display_set_write_position(1, 28 * i);
+		snprintf(str, 100, "%6.3f%c", acc_g[i], type == ACCEL? 'g' : 'G');
 		display_write(str);
 	}
 	for (int i = 0; i < 3; i++) {
-		display_set_write_position(1, 28 * i);
-		snprintf(str, 100, "%6.3fg", a_max[i]);
+		display_set_write_position(4, 28 * i);
+		snprintf(str, 100, "%6.3f%c", max_val[type].data[i], type == ACCEL? 'g' : 'G');
 		display_write(str);
 	}
 	display_set_write_position(2, 0);
-	snprintf(str, 100, "%8.4fg %8.4fg", acc_mod, a_max[3]);
+	snprintf(str, 100, "%8.4f%c %8.4fœ", acc_mod, type == ACCEL? 'g' : 'G', angle);
+	display_write(str);
+	display_set_write_position(5, 0);
+	snprintf(str, 100, "%8.4f%c", max_val[type].length, type == ACCEL? 'g' : 'G');
 	display_write(str);
 }
 
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi) {
-	display_set_write_position(3, 0);
+	display_set_write_position(0, 0);
 	for (int i = 0; i < 84; i++)
 		display_putletter('-');
 }
@@ -116,24 +156,31 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi) {
 	char str[100];
 	float gyro_g[3] = { g_data[0] * 70 / 95, g_data[1] * 70 / 95, g_data[2] * 70 / 95 };
 	float gyro_mod = sqrt(gyro_g[0]* gyro_g[0] + gyro_g[1]*gyro_g[1] + gyro_g[2]*gyro_g[2]);
-//	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
-	if (gyro_mod > g_max[3]) {
+	if (gyro_mod > max_val[GYRO].length) {
 		for (int i = 0; i < 3; i++)
-			g_max[i] = gyro_g[i];
-		g_max[3] = gyro_mod;
+			max_val[GYRO].data[i] = gyro_g[i];
+		max_val[GYRO].length = gyro_mod;
 	}
+	display_set_write_position(0, 0);
+	display_write("--  ç¶òïóëïð  --");
+	display_set_write_position(3, 0);
+	display_write("íÁËÓÉÍÁÌØÎ¦ ÚÎÁÞÅÎÎÑ:");
 	for (int i = 0; i < 3; i++) {
-		display_set_write_position(3, 28 * i);
+		display_set_write_position(1, 28 * i);
 		snprintf(str, 100, "%7.3f", gyro_g[i] / 1000);
 		display_write(str);
 	}
 	for (int i = 0; i < 3; i++) {
 		display_set_write_position(4, 28 * i);
-		snprintf(str, 100, "%7.2f", g_max[i] / 1000);
+		snprintf(str, 100, "%7.2f", max_val[GYRO].data[i] / 1000);
 		display_write(str);
 	}
+	display_set_write_position(2, 0);
+	snprintf(str, 100, "%10.5f", gyro_mod / 1000);
+	display_write(str);
+
 	display_set_write_position(5, 0);
-	snprintf(str, 100, "%10.5f %10.5f", gyro_mod / 1000, g_max[3] / 1000);
+	snprintf(str, 100, "%10.5f", max_val[GYRO].length / 1000);
 	display_write(str);
 }
 
@@ -177,6 +224,18 @@ int main(void)
   GPIO_InitTypeDef GPIO_InitStruct;
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  GPIO_InitTypeDef conf = {
+	  .Pin = GPIO_PIN_0,
+	  .Mode = GPIO_MODE_IT_RISING,
+	  .Pull = GPIO_PULLDOWN,
+	  .Speed = GPIO_SPEED_FREQ_LOW,
+  };
+  HAL_GPIO_Init(GPIOA, &conf);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 4, 0);
+
+
 //  __HAL_RCC_GPIOD_CLK_ENABLE();
 
 //  GPIO_InitStruct.Pin = GPIO_PIN_15;
@@ -193,6 +252,11 @@ int main(void)
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
   while (!acc_conf)
 	  __WFI();
+  acc_conf = false;
+  HAL_I2C_Mem_Write_IT(&hi2c1, MAG_ADDRESS<<1, CRA_REG_M, 1, m_config, 3);
+  while (!acc_conf)
+	  __WFI();
+
 
   /* USER CODE END 2 */
 
@@ -202,14 +266,21 @@ int main(void)
   {
 	  display_clear();
 
-	  g_buf[0] = L3GX_OUT_X_L | 0xC0;
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_RESET);
-	  HAL_SPI_TransmitReceive_IT(&hspi1, g_buf, g_buf, 7);
-	  HAL_Delay(1);
-	  while (HAL_GetTick() % 100)
-		  __WFI();
+	  switch (type) {
+	  case ACCEL:
+		  HAL_I2C_Mem_Read_IT(&hi2c1, ACC_ADDRESS<<1, OUT_X_L_A | 0x80, 1, (uint8_t *) a_data, 6);
+		  break;
+	  case MAGNET:
+		  HAL_I2C_Mem_Read_IT(&hi2c1, MAG_ADDRESS<<1, OUT_X_H_M, 1, (uint8_t *) a_data, 6);
+		  break;
+	  case GYRO:
+		  g_buf[0] = L3GX_OUT_X_L | 0xC0;
+		  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_RESET);
+		  HAL_SPI_TransmitReceive_IT(&hspi1, g_buf, g_buf, 7);
+		  break;
+	  }
 //	  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
-	  HAL_I2C_Mem_Read_IT(&hi2c1, ACC_ADDRESS<<1, OUT_X_L_A | 0x80, 1, (uint8_t *) a_data, 6);
+
 	  HAL_Delay(1);
 	  while (HAL_GetTick() % 1000)
 		  __WFI();
