@@ -106,7 +106,7 @@ void display_init()
 	queue_put(COMMAND, PCD8544_SETBIAS | 4);
 
 	// set VOP
-	queue_put(COMMAND, PCD8544_SETVOP | 0x3F);
+	queue_put(COMMAND, PCD8544_SETVOP | 0x39);
 
 	// normal mode
 	queue_put(COMMAND, PCD8544_FUNCTIONSET);
@@ -153,6 +153,17 @@ int display_putletter(unsigned char letter)
 	queue_start_send();
 
 	return alpha[letter].w;
+}
+
+int display_write(unsigned char * str)
+{
+	int cnt = 0;
+
+	for (; *str != '\0'; str++){
+		cnt += display_putletter(*str);
+	}
+
+	return cnt;
 }
 
 bool queue_put(enum qtype_t type, uint8_t data)
@@ -205,9 +216,11 @@ void spi_tx_cplt()
 	if (head != tail) {
 		spi_send(queue[head++].data);
 	} else {
-		queue[tail++] = dummy;
-		head = tail;
-		spi_send(0);
+		while(spi_is_tx()); // FIXME
+		cs_disable();
+//		queue[tail++] = dummy;
+//		head = tail;
+//		spi_send(0);
 	}
 }
 

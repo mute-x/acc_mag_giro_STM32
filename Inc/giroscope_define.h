@@ -77,3 +77,5 @@
 #define L3GX_FS_250DPS       0
 #define L3GX_FS_500DPS       1
 #define L3GX_FS_2000DPS      2
+
+#endif

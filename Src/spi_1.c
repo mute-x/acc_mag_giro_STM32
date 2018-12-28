@@ -26,7 +26,7 @@ void spi_init(int count, int div)
 	MODIFY_REG(SPI->CR1, SPI_CR1_BR,
 		   (divider << SPI_CR1_BR_Pos) | SPI_CR1_MSTR | SPI_CR1_SPE | SPI_CR1_SSM | SPI_CR1_SSI);
 	NVIC_EnableIRQ(SPI4_IRQn);
-	HAL_NVIC_SetPriority(SPI4_IRQn, 1, 0);
+	HAL_NVIC_SetPriority(SPI4_IRQn, 0, 0);
 
 	// Pins configuration
 	GPIO_InitTypeDef conf = {

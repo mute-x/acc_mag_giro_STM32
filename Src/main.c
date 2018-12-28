@@ -46,16 +46,22 @@
 /* USER CODE BEGIN Includes */
 #include "display.h"
 #include "accelerometer_define.h"
+#include "giroscope_define.h"
+#include <stdbool.h>
+#include <math.h>
+#include "spi_1.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint8_t start[] = {0x77, 0x80};
-uint8_t a_data[6]={};
-int message_lenght = 10;
-char a_x[message_lenght], a_y[message_lenght], a_z[message_lenght],
-g_y[message_lenght], g_p[message_lenght], g_r[message_lenght];
+uint8_t a_config[] = {0x27, 0, 0, 0x80};
+uint8_t g_config[] = {L3GX_CTRL_REG1 | 0x40, 0xF, 0, 0, 0xA0};
+int16_t a_data[3]={0};
+uint8_t g_buf[7]={0};
+int16_t * g_data = (uint16_t*)(g_buf + 1);
+float a_max[4] = {0}, g_max[4] = {0};
+volatile bool acc_conf = false;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE END PV */
@@ -70,10 +76,70 @@ void SystemClock_Config(void);
 
 /* USER CODE BEGIN 0 */
 
-//void HAL_EXTI_Callback(uint16_t )
-void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c){}
-void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c){}
-void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c){}
+void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c){
+	// We finished setting up Accel
+	acc_conf = true;
+}
+
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c){
+	char str[100];
+	float acc_g[3] = { (a_data[0] >> 4) / 1024., (a_data[1] >> 4) / 1024., (a_data[2] >> 4) / 1024. };
+	float acc_mod = sqrt(acc_g[0]* acc_g[0] + acc_g[1]*acc_g[1] + acc_g[2]*acc_g[2]);
+	if (acc_mod > a_max[3]) {
+		for (int i = 0; i < 3; i++)
+			a_max[i] = acc_g[i];
+		a_max[3] = acc_mod;
+	}
+	for (int i = 0; i < 3; i++) {
+		display_set_write_position(0, 28 * i);
+		snprintf(str, 100, "%6.3fg", acc_g[i]);
+		display_write(str);
+	}
+	for (int i = 0; i < 3; i++) {
+		display_set_write_position(1, 28 * i);
+		snprintf(str, 100, "%6.3fg", a_max[i]);
+		display_write(str);
+	}
+	display_set_write_position(2, 0);
+	snprintf(str, 100, "%8.4fg %8.4fg", acc_mod, a_max[3]);
+	display_write(str);
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi) {
+	display_set_write_position(3, 0);
+	for (int i = 0; i < 84; i++)
+		display_putletter('-');
+}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi) {
+	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
+	char str[100];
+	float gyro_g[3] = { g_data[0] * 70 / 95, g_data[1] * 70 / 95, g_data[2] * 70 / 95 };
+	float gyro_mod = sqrt(gyro_g[0]* gyro_g[0] + gyro_g[1]*gyro_g[1] + gyro_g[2]*gyro_g[2]);
+//	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
+	if (gyro_mod > g_max[3]) {
+		for (int i = 0; i < 3; i++)
+			g_max[i] = gyro_g[i];
+		g_max[3] = gyro_mod;
+	}
+	for (int i = 0; i < 3; i++) {
+		display_set_write_position(3, 28 * i);
+		snprintf(str, 100, "%7.3f", gyro_g[i] / 1000);
+		display_write(str);
+	}
+	for (int i = 0; i < 3; i++) {
+		display_set_write_position(4, 28 * i);
+		snprintf(str, 100, "%7.2f", g_max[i] / 1000);
+		display_write(str);
+	}
+	display_set_write_position(5, 0);
+	snprintf(str, 100, "%10.5f %10.5f", gyro_mod / 1000, g_max[3] / 1000);
+	display_write(str);
+}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef * hspi) {
+	HAL_SPI_RxCpltCallback(hspi);
+}
 /* USER CODE END 0 */
 
 /**
@@ -108,12 +174,25 @@ int main(void)
   MX_I2C1_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  char c[100];
+  GPIO_InitTypeDef GPIO_InitStruct;
+
+  /* GPIO Ports Clock Enable */
+//  __HAL_RCC_GPIOD_CLK_ENABLE();
+
+//  GPIO_InitStruct.Pin = GPIO_PIN_15;
+//  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+//  GPIO_InitStruct.Pull = GPIO_NOPULL;
+//  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+//  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
   display_init();
-  HAL_I2C_Mem_Write_IT(&hi2c1, ACC_ADDRESS<<1, CTRL_REG1_A, 1, start, 1);
-  HAL_Delay(1000);
-  HAL_I2C_Mem_Write_IT(&hi2c1, ACC_ADDRESS<<1, CTRL_REG4_A, 1, start + 1, 1);
-  HAL_Delay(1000);
+  HAL_I2C_Mem_Write_IT(&hi2c1, ACC_ADDRESS<<1, CTRL_REG1_A | 0x80, 1, a_config, 4);
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_SPI_Transmit_IT(&hspi1, g_config, 5);
+  while (__HAL_SPI_GET_FLAG(&hspi1, SPI_SR_BSY) || !__HAL_SPI_GET_FLAG(&hspi1, SPI_SR_TXE));
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
+  while (!acc_conf)
+	  __WFI();
 
   /* USER CODE END 2 */
 
@@ -123,26 +202,17 @@ int main(void)
   {
 	  display_clear();
 
-	  HAL_Delay(1000);
-	  HAL_I2C_Mem_Write_IT(&hi2c1, ACC_ADDRESS<<1, OUT_X_L_A | 0x80, 1, data, 6);
-
-	  display_set_write_position(0, 0);
-	  sprintf(c, " %d", (int)((int16_t)(((uint16_t) a_data[1])<<8 | a_data[0])) >> 4);
-	  for (int i = 0; c[i] != '\0'; i++){
-		  display_putletter(c[i]);
-	  }
-	  display_set_write_position(1, 0);
-	  sprintf(c, " %d", (int)((int16_t)(((uint16_t) a_data[3])<<8 | a_data[2])) >> 4);
-	  for (int i = 0; c[i] != '\0'; i++){
-		  display_putletter(c[i]);
-	  }
-	  display_set_write_position(2, 0);
-	  sprintf(c, " %d", (int)((int16_t)(((uint16_t) a_data[5])<<8 | a_data[4])) >> 4);
-	  for (int i = 0; c[i] != '\0'; i++){
-		  display_putletter(c[i]);
-	  }
-
-	  HAL_Delay(1000);
+	  g_buf[0] = L3GX_OUT_X_L | 0xC0;
+	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_RESET);
+	  HAL_SPI_TransmitReceive_IT(&hspi1, g_buf, g_buf, 7);
+	  HAL_Delay(1);
+	  while (HAL_GetTick() % 100)
+		  __WFI();
+//	  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
+	  HAL_I2C_Mem_Read_IT(&hi2c1, ACC_ADDRESS<<1, OUT_X_L_A | 0x80, 1, (uint8_t *) a_data, 6);
+	  HAL_Delay(1);
+	  while (HAL_GetTick() % 1000)
+		  __WFI();
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
