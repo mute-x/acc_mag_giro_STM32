@@ -124,7 +124,7 @@ void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c){
 	if (type == ACCEL)
 		display_write("--αλσεμεςονετς--");
 	else
-		display_write("-- ναηξ¶τονετς --");
+		display_write("--ναηξ¶τονετς--");
 	display_set_write_position(3, 0);
 	display_write("νΑΛΣΙΝΑΜΨΞ¦ ΪΞΑήΕΞΞΡ:");
 	for (int i = 0; i < 3; i++) {
