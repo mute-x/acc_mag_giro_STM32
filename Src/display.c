@@ -26,8 +26,8 @@
 
 enum qtype_t {COMMAND, DATA, DUMMY};
 
-static struct __attribute__((packed)) command{
-	uint8_t type;
+static struct command{
+	enum qtype_t type;
 	uint8_t data;
 } queue[256];
 static volatile uint8_t head = 0, tail = 0;
@@ -42,9 +42,6 @@ static inline void cs_disable();
 
 static inline bool queue_put(enum qtype_t type, uint8_t data);
 static inline void queue_start_send(void);
-
-static inline int max(int a, int b);
-static inline int min(int a, int b);
 
 // Defines
 
@@ -179,16 +176,15 @@ bool queue_put(enum qtype_t type, uint8_t data)
 	return true;
 }
 
+static enum qtype_t last;
+
 static inline void queue_start_send(void)
 {
 	if (spi_can_send()) {
 		head++;
 		cs_enable();
-		if (queue[head - 1].type == COMMAND)
-			set_cmd_mode();
-		else if (queue[head - 1].type == DATA)
-			set_data_mode();
-		spi_send(queue[head - 1].data);
+		last = queue[head - 1].type;
+		while (!spi_send(queue[head - 1].data));
 	}
 }
 
@@ -197,24 +193,18 @@ void spi_tx_cplt()
 	static const struct command dummy = {.type = DUMMY};
 	// We are always transmitting something
 	// Configure pins for previous byte
-	switch (queue[head - 1].type) {
+	switch (last) {
 	case COMMAND:
-		cs_enable();
 		set_cmd_mode();
 		break;
 	case DATA:
-		cs_enable();
 		set_data_mode();
-		break;
-	case DUMMY:
-		if (head == tail) {
-			cs_disable();
-			return;
-		}
 		break;
 	}
 	if (head != tail) {
-		spi_send(queue[head++].data);
+		last = queue[head].type;
+		while (!spi_send(queue[head].data));
+		head++;
 	} else {
 		while(spi_is_tx()); // FIXME
 		cs_disable();
@@ -240,20 +230,4 @@ void cs_enable()
 void cs_disable()
 {
 	GPIOE->BSRR = GPIO_BSRR_BS11;
-}
-
-static inline int max(int a, int b)
-{
-	if (a > b)
-		return a;
-	else
-		return b;
-}
-
-static inline int min(int a, int b)
-{
-	if (a < b)
-		return a;
-	else
-		return b;
 }
